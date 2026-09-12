@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from loguru import logger
-from websockets_proxy import Proxy, proxy_connect
+from websockets.asyncio.client import connect
 from fake_useragent import UserAgent
 
 ip_retry_count = {}
@@ -27,12 +27,9 @@ async def connect_to_wss(http_proxy, user_id, random_user_agent):
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
             uri = "wss://proxy.wynd.network:4444/"
-            server_hostname = "proxy.wynd.network"
             
-            # Sử dụng định dạng http:// cho Proxy
-            proxy = Proxy.from_url(http_proxy)
-            async with proxy_connect(uri, proxy=proxy, ssl=ssl_context, server_hostname=server_hostname,
-                                     extra_headers=custom_headers) as websocket:
+            # Kết nối trực tiếp qua HTTP proxy URL
+            async with connect(uri, proxy=http_proxy, ssl=ssl_context, extra_headers=custom_headers) as websocket:
                 async def send_ping():
                     while True:
                         send_message = json.dumps(
