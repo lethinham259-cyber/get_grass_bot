@@ -5,20 +5,21 @@ import json
 import time
 import uuid
 from loguru import logger
-from websockets.asyncio.client import connect
+from websockets_proxy import Proxy, proxy_connect
 from fake_useragent import UserAgent
 
 ip_retry_count = {}
 user_agent = UserAgent()
-max_retries = 5
+max_retries = 3
 
-async def connect_to_wss(http_proxy, user_id, random_user_agent):
-    device_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, http_proxy))
-    logger.info(device_id)
+async def connect_to_wss(proxy_url, user_id, random_user_agent):
+    device_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, proxy_url))
+    logger.info(f"Device ID: {device_id} using proxy: {proxy_url}")
     ip_retry_count[device_id] = 0
+    
     while True:
         try:
-            await asyncio.sleep(random.randint(1, 10) / 10)
+            await asyncio.sleep(random.randint(1, 3))
             custom_headers = {
                 "User-Agent": random_user_agent,
                 "Origin": "chrome-extension://ilehaonighjijnmpnagapkhpcdbhclfg",
@@ -27,18 +28,19 @@ async def connect_to_wss(http_proxy, user_id, random_user_agent):
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
             uri = "wss://proxy.wynd.network:4444/"
+            server_hostname = "proxy.wynd.network"
             
-            # Sử dụng tham số proxy chuẩn cho websockets và đưa headers vào chung
-            async with connect(uri, proxy=http_proxy, ssl=ssl_context, additional_headers=custom_headers) as websocket:
+            proxy = Proxy.from_url(proxy_url)
+            async with proxy_connect(uri, proxy=proxy, ssl=ssl_context, server_hostname=server_hostname,
+                                     extra_headers=custom_headers) as websocket:
                 async def send_ping():
                     while True:
                         send_message = json.dumps(
                             {"id": str(uuid.uuid4()), "version": "1.0.0", "action": "PING", "data": {}})
-                        logger.debug(send_message)
                         await websocket.send(send_message)
                         await asyncio.sleep(15)
 
-                send_ping_task = asyncio.create_task(send_ping())
+                asyncio.create_task(send_ping())
                 while True:
                     response = await websocket.recv()
                     message = json.loads(response)
@@ -56,29 +58,31 @@ async def connect_to_wss(http_proxy, user_id, random_user_agent):
                                 "version": "4.0.1"
                             }
                         }
-                        logger.debug(auth_response)
                         await websocket.send(json.dumps(auth_response))
 
                     elif message.get("action") == "PONG":
                         pong_response = {"id": message["id"], "origin_action": "PONG"}
-                        logger.debug(pong_response)
                         await websocket.send(json.dumps(pong_response))
         except Exception as e:
             ip_retry_count[device_id] += 1
-            logger.error(f"Error with proxy {http_proxy}: {str(e)} (Retry {ip_retry_count[device_id]}/{max_retries})")
+            logger.error(f"Error with proxy {proxy_url}: {str(e)} (Retry {ip_retry_count[device_id]}/{max_retries})")
             if ip_retry_count[device_id] > max_retries:
-                logger.error(f"Max retries exceeded for proxy {http_proxy}. Removing it.")
-                remove_error_proxy(http_proxy)
+                logger.error(f"Max retries exceeded for proxy {proxy_url}. Removing it.")
+                remove_error_proxy(proxy_url)
                 if device_id in ip_retry_count:
                     del ip_retry_count[device_id]
                 return None
-            continue
+            await asyncio.sleep(5)
 
 async def main():
     _user_id = "3JDf1yPR7ceCnFGtoBWyaHPJJdT"
     proxy_file = 'proxy.txt'
     with open(proxy_file, 'r') as file:
-        all_proxies = file.read().splitlines()
+        all_proxies = [line.strip() for line in file.read().splitlines() if line.strip()]
+
+    if not all_proxies:
+        logger.error("No proxies found in proxy.txt!")
+        return
 
     num_proxies_to_use = min(len(all_proxies), 10)
     active_proxies = random.sample(all_proxies, num_proxies_to_use)
@@ -105,13 +109,16 @@ async def main():
             tasks[new_task] = proxy
 
 def remove_error_proxy(proxy):
-    with open("proxy.txt", "r+") as file:
-        lines = file.readlines()
-        file.seek(0)
-        for line in lines:
-            if line.strip() != proxy:
-                file.write(line)
-        file.truncate()
+    try:
+        with open("proxy.txt", "r+") as file:
+            lines = file.readlines()
+            file.seek(0)
+            for line in lines:
+                if line.strip() != proxy:
+                    file.write(line)
+            file.truncate()
+    except Exception as e:
+        logger.error(f"Error removing proxy from file: {e}")
 
 if __name__ == '__main__':
     asyncio.run(main())
