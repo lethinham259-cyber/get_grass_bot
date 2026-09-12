@@ -7,11 +7,13 @@ import uuid
 from loguru import logger
 from websockets_proxy import Proxy, proxy_connect
 from fake_useragent import UserAgent
+
 ip_retry_count = {}
 user_agent = UserAgent()
 max_retries = 5
-async def connect_to_wss(socks5_proxy, user_id, random_user_agent):
-    device_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, socks5_proxy))
+
+async def connect_to_wss(http_proxy, user_id, random_user_agent):
+    device_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, http_proxy))
     logger.info(device_id)
     ip_retry_count[device_id] = 0
     while True:
@@ -26,7 +28,9 @@ async def connect_to_wss(socks5_proxy, user_id, random_user_agent):
             ssl_context.verify_mode = ssl.CERT_NONE
             uri = "wss://proxy.wynd.network:4444/"
             server_hostname = "proxy.wynd.network"
-            proxy = Proxy.from_url(socks5_proxy)
+            
+            # Sử dụng định dạng http:// cho Proxy
+            proxy = Proxy.from_url(http_proxy)
             async with proxy_connect(uri, proxy=proxy, ssl=ssl_context, server_hostname=server_hostname,
                                      extra_headers=custom_headers) as websocket:
                 async def send_ping():
@@ -64,14 +68,13 @@ async def connect_to_wss(socks5_proxy, user_id, random_user_agent):
                         await websocket.send(json.dumps(pong_response))
         except Exception as e:
             ip_retry_count[device_id] += 1
-            logger.error(f"Error with proxy {socks5_proxy}: {str(e)} (Retry {ip_retry_count[device_id]}/{max_retries})")
+            logger.error(f"Error with proxy {http_proxy}: {str(e)} (Retry {ip_retry_count[device_id]}/{max_retries})")
             if ip_retry_count[device_id] > max_retries:
-                logger.error(f"Max retries exceeded for proxy {socks5_proxy}. Removing it.")
-                remove_error_proxy(socks5_proxy)
+                logger.error(f"Max retries exceeded for proxy {http_proxy}. Removing it.")
+                remove_error_proxy(http_proxy)
                 del ip_retry_count[device_id]
                 return None
             continue
-
 
 async def main():
     _user_id = "3JDf1yPR7ceCnFGtoBWyaHPJJdT"
@@ -102,7 +105,6 @@ async def main():
             new_task = asyncio.create_task(connect_to_wss(proxy, _user_id, random_user_agent))
             tasks[new_task] = proxy
 
-
 def remove_error_proxy(proxy):
     with open("proxy.txt", "r+") as file:
         lines = file.readlines()
@@ -111,7 +113,6 @@ def remove_error_proxy(proxy):
             if line.strip() != proxy:
                 file.write(line)
         file.truncate()
-
 
 if __name__ == '__main__':
     asyncio.run(main())
