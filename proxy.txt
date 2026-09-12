@@ -1,1 +1,5 @@
-socks5://username:pass@ip:port
+socks5://31.59.20.176:6754:gjfoxyte:08fyix6537x6
+socks5://45.38.107.97:6014:gjfoxyte:08fyix6537x6
+socks5://198.105.121.200:6462:gjfoxyte:08fyix6537x6
+socks5://64.137.96.74:6641:gjfoxyte:08fyix6537x6
+socks5://198.23.243.226:6361:gjfoxyte:08fyix6537x6
