@@ -74,13 +74,14 @@ async def connect_to_wss(socks5_proxy, user_id, random_user_agent):
 
 
 async def main():
-    _user_id = "PRINTED TEXT IS THE USER_ID"  # Replace Your User ID HERE
-    proxy_file = 'proxy.txt'  # your Path to Proxy3.txt file
-    # formate => socks5://username:pass@ip:port
+    _user_id = "3JDf1yPR7ceCnFGtoBWyaHPJJdT"
+    proxy_file = 'proxy.txt'
     with open(proxy_file, 'r') as file:
         all_proxies = file.read().splitlines()
 
-    active_proxies = random.sample(all_proxies, 5)  # write the number of proxy you wana use
+    num_proxies_to_use = min(len(all_proxies), 10)
+    active_proxies = random.sample(all_proxies, num_proxies_to_use)
+    
     tasks = {asyncio.create_task(connect_to_wss(proxy, _user_id, user_agent.random)): proxy for proxy in active_proxies}
 
     while True:
@@ -90,12 +91,12 @@ async def main():
                 failed_proxy = tasks[task]
                 logger.info(f"Removing and replacing failed proxy: {failed_proxy}")
                 active_proxies.remove(failed_proxy)
-                new_proxy = random.choice(all_proxies)
-                active_proxies.append(new_proxy)
-                new_task = asyncio.create_task(connect_to_wss(new_proxy, _user_id, user_agent.random))
-                tasks[new_task] = new_proxy  # Replace the task in the dictionary
-            tasks.pop(task)  # Remove the completed task whether it succeeded or failed
-        # Replenish the tasks if any have completed
+                if all_proxies:
+                    new_proxy = random.choice(all_proxies)
+                    active_proxies.append(new_proxy)
+                    new_task = asyncio.create_task(connect_to_wss(new_proxy, _user_id, user_agent.random))
+                    tasks[new_task] = new_proxy
+            tasks.pop(task)
         for proxy in set(active_proxies) - set(tasks.values()):
             random_user_agent = user_agent.random
             new_task = asyncio.create_task(connect_to_wss(proxy, _user_id, random_user_agent))
@@ -114,4 +115,3 @@ def remove_error_proxy(proxy):
 
 if __name__ == '__main__':
     asyncio.run(main())
-
