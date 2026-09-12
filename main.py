@@ -4,6 +4,7 @@ import ssl
 import json
 import time
 import uuid
+import os
 from loguru import logger
 from websockets.asyncio.client import connect
 from fake_useragent import UserAgent
@@ -16,6 +17,11 @@ async def connect_to_wss(http_proxy, user_id, random_user_agent):
     device_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, http_proxy))
     logger.info(device_id)
     ip_retry_count[device_id] = 0
+    
+    # Cấu hình biến môi trường proxy để websockets tự nhận diện HTTP proxy chính xác
+    os.environ["https_proxy"] = http_proxy
+    os.environ["http_proxy"] = http_proxy
+    
     while True:
         try:
             await asyncio.sleep(random.randint(1, 10) / 10)
@@ -28,8 +34,7 @@ async def connect_to_wss(http_proxy, user_id, random_user_agent):
             ssl_context.verify_mode = ssl.CERT_NONE
             uri = "wss://proxy.wynd.network:4444/"
             
-            # Kết nối trực tiếp qua HTTP proxy URL
-            async with connect(uri, proxy=http_proxy, ssl=ssl_context, extra_headers=custom_headers) as websocket:
+            async with connect(uri, ssl=ssl_context, extra_headers=custom_headers) as websocket:
                 async def send_ping():
                     while True:
                         send_message = json.dumps(
