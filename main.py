@@ -1,11 +1,11 @@
 import asyncio
 import random
-import ssl
 import json
 import time
 import uuid
 from loguru import logger
-from websockets_proxy import Proxy, proxy_connect
+import aiohttp
+from aiohttp_socks import ProxyConnector
 from fake_useragent import UserAgent
 
 ip_retry_count = {}
@@ -14,8 +14,10 @@ max_retries = 3
 
 async def connect_to_wss(proxy_url, user_id, random_user_agent):
     device_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, proxy_url))
-    logger.info(f"Device ID: {device_id} using proxy: {proxy_url}")
+    logger.info(f"Device ID: {device_id} using HTTP proxy: {proxy_url}")
     ip_retry_count[device_id] = 0
+    
+    uri = "wss://proxy.wynd.network:4444/"
     
     while True:
         try:
@@ -24,45 +26,48 @@ async def connect_to_wss(proxy_url, user_id, random_user_agent):
                 "User-Agent": random_user_agent,
                 "Origin": "chrome-extension://ilehaonighjijnmpnagapkhpcdbhclfg",
             }
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            uri = "wss://proxy.wynd.network:4444/"
-            server_hostname = "proxy.wynd.network"
             
-            proxy = Proxy.from_url(proxy_url)
-            async with proxy_connect(uri, proxy=proxy, ssl=ssl_context, server_hostname=server_hostname,
-                                     extra_headers=custom_headers) as websocket:
-                async def send_ping():
-                    while True:
-                        send_message = json.dumps(
-                            {"id": str(uuid.uuid4()), "version": "1.0.0", "action": "PING", "data": {}})
-                        await websocket.send(send_message)
-                        await asyncio.sleep(15)
+            # Sử dụng ProxyConnector hỗ trợ cả HTTP và SOCKS proxy chuẩn xác của aiohttp
+            connector = ProxyConnector.from_url(proxy_url)
+            
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.ws_connect(uri, headers=custom_headers, ssl=False) as websocket:
+                    async def send_ping():
+                        while True:
+                            send_message = json.dumps(
+                                {"id": str(uuid.uuid4()), "version": "1.0.0", "action": "PING", "data": {}})
+                            await websocket.send_str(send_message)
+                            await asyncio.sleep(15)
 
-                asyncio.create_task(send_ping())
-                while True:
-                    response = await websocket.recv()
-                    message = json.loads(response)
-                    logger.info(message)
-                    if message.get("action") == "AUTH":
-                        auth_response = {
-                            "id": message["id"],
-                            "origin_action": "AUTH",
-                            "result": {
-                                "browser_id": device_id,
-                                "user_id": user_id,
-                                "user_agent": custom_headers['User-Agent'],
-                                "timestamp": int(time.time()),
-                                "device_type": "extension",
-                                "version": "4.0.1"
-                            }
-                        }
-                        await websocket.send(json.dumps(auth_response))
+                    ping_task = asyncio.create_task(send_ping())
+                    try:
+                        async for msg in websocket:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                message = json.loads(msg.data)
+                                logger.info(message)
+                                if message.get("action") == "AUTH":
+                                    auth_response = {
+                                        "id": message["id"],
+                                        "origin_action": "AUTH",
+                                        "result": {
+                                            "browser_id": device_id,
+                                            "user_id": user_id,
+                                            "user_agent": custom_headers['User-Agent'],
+                                            "timestamp": int(time.time()),
+                                            "device_type": "extension",
+                                            "version": "4.0.1"
+                                        }
+                                    }
+                                    await websocket.send_str(json.dumps(auth_response))
 
-                    elif message.get("action") == "PONG":
-                        pong_response = {"id": message["id"], "origin_action": "PONG"}
-                        await websocket.send(json.dumps(pong_response))
+                                elif message.get("action") == "PONG":
+                                    pong_response = {"id": message["id"], "origin_action": "PONG"}
+                                    await websocket.send_str(json.dumps(pong_response))
+                            elif msg.type == aiohttp.WSMsgType.ERROR:
+                                break
+                    finally:
+                        ping_task.cancel()
+                        
         except Exception as e:
             ip_retry_count[device_id] += 1
             logger.error(f"Error with proxy {proxy_url}: {str(e)} (Retry {ip_retry_count[device_id]}/{max_retries})")
